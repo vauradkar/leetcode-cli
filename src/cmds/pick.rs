@@ -138,11 +138,8 @@ impl Command for PickCommand {
         let fid = match m.contains_id("name") {
             //check for name specified
             true => {
-                match m.get_one::<String>("name").map(|name| name) {
-                    Some(quesname) => match cache.get_problem_id_from_name(quesname) {
-                        Ok(p) => p,
-                        Err(_) => 1,
-                    },
+                match m.get_one::<String>("name") {
+                    Some(quesname) => cache.get_problem_id_from_name(quesname).unwrap_or(1),
                     None => {
                         // Pick random without specify id
                         let problem = &problems[rand::thread_rng().gen_range(0..problems.len())];

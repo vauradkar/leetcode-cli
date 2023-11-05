@@ -22,16 +22,11 @@ pub fn conn(p: String) -> SqliteConnection {
 }
 
 /// Condition submit or test
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub enum Run {
     Test,
+    #[default]
     Submit,
-}
-
-impl Default for Run {
-    fn default() -> Self {
-        Run::Submit
-    }
 }
 
 /// Requests if data not download
@@ -156,6 +151,12 @@ impl Cache {
     /// Get question
     #[allow(clippy::useless_let_if_seq)]
     pub async fn get_question(&self, rfid: i32) -> Result<Question, Error> {
+        self.get_question_silent(rfid, false).await
+    }
+
+    /// Get question for internal use
+    #[allow(clippy::useless_let_if_seq)]
+    pub async fn get_question_silent(&self, rfid: i32, silent: bool) -> Result<Question, Error> {
         let target: Problem = problems.filter(fid.eq(rfid)).first(&mut self.conn()?)?;
 
         let ids = match target.level {
@@ -165,12 +166,14 @@ impl Cache {
             _ => target.fid.to_string().dimmed(),
         };
 
-        println!(
-            "\n[{}] {} {}\n\n",
-            &ids,
-            &target.name.bold().underline(),
-            "is on the run...".dimmed()
-        );
+        if !silent {
+            println!(
+                "\n[{}] {} {}\n\n",
+                &ids,
+                &target.name.bold().underline(),
+                "is on the run...".dimmed()
+            );
+        }
 
         if target.category != "algorithms" {
             return Err(Error::FeatureError(

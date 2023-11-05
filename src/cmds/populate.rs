@@ -9,7 +9,8 @@ use std::{
 use super::Command;
 use crate::{cache::models::Problem, helper::code_path, Cache, Config, Error};
 use async_trait::async_trait;
-use clap::{Arg, ArgMatches, Command as ClapCommand};
+use clap::{Arg, ArgAction, ArgMatches, Command as ClapCommand};
+use colored::Colorize;
 use std::os::unix::fs::symlink;
 
 static PERCENT_VIEWS: &[&str] = &[
@@ -34,6 +35,7 @@ fn write_comment(file: &mut File, comment: &str) -> Result<(), Error> {
 ///     leetcode populate
 ///
 /// FLAGS:
+///     -c, --continue_on_error Prints error message and continues to populate
 ///     -h, --help       Prints help information
 ///     -V, --version    Prints version information
 ///
@@ -60,7 +62,15 @@ impl PopulateCommand {
         if !Path::new(&path).exists() {
             let mut qr = serde_json::from_str(&problem.desc);
             if qr.is_err() {
-                qr = Ok(cache.get_question(problem.fid).await?);
+                qr = Ok(cache
+                    .get_question_silent(problem.fid, true)
+                    .await
+                    .map_err(|e| {
+                        Error::FeatureError(format!(
+                            "{:?}. name: {} id: {}",
+                            e, problem.name, problem.fid,
+                        ))
+                    })?);
             }
 
             let question: Question = qr?;
@@ -135,14 +145,15 @@ impl PopulateCommand {
 
             // if language is not found in the list of supported languges clean up files
             if !flag {
+                let err_msg = format!(
+                    "Question doesn't support {}, please try another. name: {}, id:{}",
+                    &lang, problem.name, problem.fid
+                );
                 std::fs::remove_file(&path)?;
                 if test_flag {
                     std::fs::remove_file(&test_path)?;
                 }
-                return Err(crate::Error::FeatureError(format!(
-                    "This question doesn't support {}, please try another",
-                    &lang
-                )));
+                return Err(crate::Error::FeatureError(err_msg));
             }
         }
 
@@ -159,19 +170,31 @@ impl PopulateCommand {
     }
 
     fn create_view(problem: &Problem, original: &Path) -> Result<(), Error> {
-        for view in [
-            Path::new(problem.category.as_str()),
-            Path::new(problem.display_level()),
-            Path::new(if problem.starred {
-                "starred"
-            } else {
-                "unstarred"
-            }),
-            &Self::get_percent_view(problem),
+        for (relative_path, view) in [
+            (
+                Path::new("..").to_owned(),
+                Path::new(problem.category.as_str()),
+            ),
+            (
+                Path::new("..").to_owned(),
+                Path::new(problem.display_level()),
+            ),
+            (
+                Path::new("..").to_owned(),
+                Path::new(if problem.starred {
+                    "starred"
+                } else {
+                    "unstarred"
+                }),
+            ),
+            (Path::new("..").join(".."), &Self::get_percent_view(problem)),
         ] {
             let view_dir = original.parent().unwrap().join(view);
             create_dir_all(&view_dir)?;
-            symlink(original, view_dir.join(original.file_name().unwrap()))?
+            symlink(
+                relative_path.join(original.file_name().unwrap()),
+                view_dir.join(original.file_name().unwrap()),
+            )?
         }
         Ok(())
     }
@@ -191,6 +214,20 @@ impl Command for PopulateCommand {
                     .num_args(1)
                     .help("Populate with specific language"),
             )
+            .arg(
+                Arg::new("continue_on_error")
+                    .short('c')
+                    .long("continue_on_error")
+                    .help("Populate with specific language")
+                    .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("skip_premium")
+                    .short('s')
+                    .long("skip_premium")
+                    .help("skip populating premium questions")
+                    .action(ArgAction::SetTrue),
+            )
     }
 
     /// `populate` handler
@@ -201,10 +238,12 @@ impl Command for PopulateCommand {
         let mut problems = cache.get_problems()?;
 
         if problems.is_empty() {
+            println!("downloading problems.");
             cache.download_problems().await?;
             cache = Cache::new()?;
             problems = cache.get_problems()?;
         }
+
         let mut conf = cache.to_owned().0.conf;
 
         // condition language
@@ -217,9 +256,30 @@ impl Command for PopulateCommand {
         }
 
         let mut mod_rs_files = HashMap::new();
+        let continue_on_error = m.contains_id("continue_on_error");
+        let skip_premium = m.contains_id("skip_premium");
 
-        for problem in &mut problems[..10] {
-            Self::write_file(problem, &conf, &cache).await?;
+        let mut premium_count = 0;
+        let mut error_count = 0;
+        for problem in &mut problems {
+            if skip_premium && problem.locked {
+                premium_count += 1;
+                let err_msg = format!(
+                    "premium question. name: {}, id:{}",
+                    problem.name, problem.fid
+                );
+                println!("{} {}", "skipping".yellow(), err_msg);
+                continue;
+            }
+
+            let ret = Self::write_file(problem, &conf, &cache).await;
+            if ret.is_err() && continue_on_error {
+                error_count += 1;
+                println!("{:?}", ret.unwrap_err());
+            } else {
+                ret?;
+            }
+
             let module = PathBuf::from(code_path(problem, None)?);
             let mod_path = module.parent().unwrap().join("mod.rs");
             let mod_name = module.file_stem().unwrap().to_string_lossy().to_string();
@@ -236,6 +296,13 @@ impl Command for PopulateCommand {
         for mod_rs in mod_rs_files.values_mut() {
             mod_rs.write_all("\n\npub(crate) struct Solution;\n".as_bytes())?;
         }
+
+        println!(
+            "problems found: {}",
+            problems.len().to_string().bright_white()
+        );
+        println!("premium questions: {}", premium_count.to_string().green());
+        println!("errors encountered: {}", error_count.to_string().red());
         Ok(())
     }
 }

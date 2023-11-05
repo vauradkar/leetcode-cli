@@ -91,7 +91,7 @@ impl LeetCode {
         json.insert("variables", r#"{"slug": "$slug"}"#.replace("$slug", slug));
         json.insert(
             "query",
-            vec![
+            [
                 "query getTopicTag($slug: String!) {",
                 "  topicTag(slug: $slug) {",
                 "    questions {",
@@ -153,7 +153,7 @@ impl LeetCode {
         json.insert("operationName", "daily".to_string());
         json.insert(
             "query",
-            vec![
+            [
                 "query daily {",
                 "  activeDailyCodingChallengeQuestion {",
                 "    question {",
@@ -185,7 +185,7 @@ impl LeetCode {
         let mut json: Json = HashMap::new();
         json.insert(
             "query",
-            vec![
+            [
                 "query getQuestionDetail($titleSlug: String!) {",
                 "  question(titleSlug: $titleSlug) {",
                 "    content",
@@ -216,7 +216,7 @@ impl LeetCode {
             json: Some(json),
             mode: Mode::Post,
             name: "get_problem_detail",
-            url: self.conf.sys.urls.graphql.into(),
+            url: self.conf.sys.urls.graphql,
         }
         .send(&self.client)
         .await
