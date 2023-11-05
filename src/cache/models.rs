@@ -31,7 +31,7 @@ pub struct Problem {
 }
 
 impl Problem {
-    fn display_level(&self) -> &str {
+    pub fn display_level(&self) -> &str {
         match self.level {
             1 => "Easy",
             2 => "Medium",

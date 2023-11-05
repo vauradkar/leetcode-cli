@@ -41,10 +41,7 @@ impl LeetCode {
             let cookies = super::chrome::cookies()?;
             (cookies.to_string(), cookies.csrf)
         } else {
-            (
-                conf.cookies.clone().to_string(),
-                conf.cookies.clone().csrf,
-            )
+            (conf.cookies.clone().to_string(), conf.cookies.clone().csrf)
         };
         let default_headers = LeetCode::headers(
             HeaderMap::new(),

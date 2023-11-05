@@ -188,37 +188,33 @@ mod file {
         }
     }
 
-    use crate::{cache::models::Problem, Error};
+    use crate::{cache::models::Problem, Config, Error};
+
+    fn get_filename(conf: Config, problem: &Problem, ext: String) -> Result<String, Error> {
+        let mut path = format!("{}/{}.{}", conf.storage.code()?, conf.code.pick, ext);
+
+        path = path.replace("${fid}.${slug}", "${slug}_${fid}");
+        path = path.replace("${fid}", &problem.fid.to_string());
+        path = path.replace("${slug}", &problem.slug.to_string().replace('-', "_"));
+
+        Ok(path)
+    }
 
     /// Generate test cases path by fid
     pub fn test_cases_path(problem: &Problem) -> Result<String, Error> {
         let conf = crate::config::Config::locate()?;
-        let mut path = format!("{}/{}.tests.dat", conf.storage.code()?, conf.code.pick);
-
-        path = path.replace("${fid}", &problem.fid.to_string());
-        path = path.replace("${slug}", &problem.slug.to_string());
-        Ok(path)
+        get_filename(conf, problem, "tests.dat".to_owned())
     }
 
     /// Generate code path by fid
     pub fn code_path(problem: &Problem, l: Option<String>) -> Result<String, Error> {
         let conf = crate::config::Config::locate()?;
-        let mut lang = conf.code.lang;
+        let mut lang = conf.code.lang.to_owned();
         if l.is_some() {
             lang = l.ok_or(Error::NoneError)?;
         }
 
-        let mut path = format!(
-            "{}/{}.{}",
-            conf.storage.code()?,
-            conf.code.pick,
-            suffix(&lang)?,
-        );
-
-        path = path.replace("${fid}", &problem.fid.to_string());
-        path = path.replace("${slug}", &problem.slug.to_string());
-
-        Ok(path)
+        get_filename(conf, problem, suffix(&lang)?.to_owned())
     }
 
     /// Load python scripts
