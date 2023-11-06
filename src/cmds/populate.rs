@@ -1,8 +1,9 @@
 //! Populate command
+use std::fmt::Write as FmtWrite;
+use std::io::Write;
 use std::{
     collections::HashMap,
     fs::{create_dir_all, File, OpenOptions},
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -17,12 +18,20 @@ static PERCENT_VIEWS: &[&str] = &[
     "0-10", "10-20", "20-30", "30-40", "40-50", "50-60", "60-70", "70-80", "80-90", "90-100",
 ];
 
-static RUST_DOC_STR_START: &str = "//! ";
+static RUST_DOC_STR_START: &str = "//!";
 static RUST_DOC_STR_END: &str = "\n//!\n";
 
-fn write_comment(file: &mut File, comment: &str) -> Result<(), Error> {
-    file.write_all(format!("{}{}{}", RUST_DOC_STR_START, comment, RUST_DOC_STR_END).as_bytes())?;
-    Ok(())
+fn write_comment(content: &mut String, comment: &str) {
+    if content.trim().is_empty() {
+        write!(content, "{}{}", RUST_DOC_STR_START, RUST_DOC_STR_END).unwrap();
+    } else {
+        write!(
+            content,
+            "{} {}{}",
+            RUST_DOC_STR_START, comment, RUST_DOC_STR_END
+        )
+        .unwrap();
+    }
 }
 
 /// Abstract `populate` command
@@ -43,6 +52,40 @@ fn write_comment(file: &mut File, comment: &str) -> Result<(), Error> {
 ///     <id>    question id
 /// ```
 pub struct PopulateCommand;
+
+fn create_file_header(problem: &Problem, url: &str, question_desc: &str) -> String {
+    let mut content = String::new();
+    write_comment(&mut content, "# Challenge info");
+    write_comment(&mut content, &format!("url: <{}>", url));
+    write_comment(&mut content, &format!("percent: {}", problem.percent));
+    write_comment(&mut content, &format!("level: {}", problem.display_level()));
+    write_comment(&mut content, &format!("category: {}", problem.category));
+
+    write_comment(&mut content, "# Question");
+    for q_line in question_desc.lines() {
+        write_comment(&mut content, q_line);
+    }
+
+    writeln!(content, "// delete the line below to build the solution\n").unwrap();
+    write!(content, "#[cfg(feature = \"ignored\")]").unwrap();
+    writeln!(content, "mod inner {{").unwrap();
+
+    writeln!(content, "use crate::solutions::Solution;").unwrap();
+    writeln!(content).unwrap();
+    content
+}
+
+fn create_file_footer(content: &mut String) {
+    // closing brace for mod inner
+    writeln!(content, "mod x{{}}}}").unwrap();
+}
+
+fn fix_rust_code(content: &str) -> Result<String, crate::Error> {
+    let content = content.replace('\t', "    ");
+    let content = content.replace("box: Vec<Vec<char>>", "boxy: Vec<Vec<char>>");
+    let syntax_tree = syn::parse_file(&content).map_err(|e| Error::FeatureError(e.to_string()))?;
+    Ok(prettyplease::unparse(&syntax_tree))
+}
 
 impl PopulateCommand {
     async fn write_file(
@@ -75,64 +118,50 @@ impl PopulateCommand {
 
             let question: Question = qr?;
 
-            let mut file_code = File::create(&path)?;
             let question_desc = question.desc_comment(conf) + "\n";
 
             let test_path = crate::helper::test_cases_path(problem)?;
 
             let mut flag = false;
+            let mut content = create_file_header(
+                problem,
+                &conf.sys.urls.problem(&problem.slug),
+                &question.desc(),
+            );
 
-            write_comment(&mut file_code, "# Challenge info")?;
-            write_comment(
-                &mut file_code,
-                &format!("url: <{}>", conf.sys.urls.problem(&problem.slug)),
-            )?;
-            write_comment(&mut file_code, &format!("percent: {}", problem.percent))?;
-            write_comment(
-                &mut file_code,
-                &format!("level: {}", problem.display_level()),
-            )?;
-            write_comment(&mut file_code, &format!("category: {}", problem.category))?;
-
-            write_comment(&mut file_code, "# Question")?;
-            for q_line in question.desc().lines() {
-                write_comment(&mut file_code, q_line)?;
-            }
-            file_code.write_all("use crate::solutions::Solution;\n\n".as_bytes())?;
             for d in question.defs.0 {
                 if d.value == *lang {
                     flag = true;
                     if conf.code.comment_problem_desc {
-                        file_code.write_all(p_desc_comment.as_bytes())?;
-                        file_code.write_all(question_desc.as_bytes())?;
+                        write!(content, "{}", p_desc_comment).unwrap();
+                        write!(content, "{}", question_desc).unwrap();
                     }
                     if let Some(inject_before) = &conf.code.inject_before {
                         for line in inject_before {
-                            file_code.write_all((line.to_string() + "\n").as_bytes())?;
+                            writeln!(content, "{}", line).unwrap();
                         }
                     }
                     if conf.code.edit_code_marker {
-                        file_code.write_all(
-                            (conf.code.comment_leading.clone()
-                                + " "
-                                + &conf.code.start_marker
-                                + "\n")
-                                .as_bytes(),
-                        )?;
+                        writeln!(
+                            content,
+                            "{} {}",
+                            conf.code.comment_leading.clone(),
+                            &conf.code.start_marker
+                        )
+                        .unwrap();
                     }
-                    file_code.write_all((d.code.to_string() + "\n").as_bytes())?;
+                    writeln!(content, "{}", d.code).unwrap();
                     if conf.code.edit_code_marker {
-                        file_code.write_all(
-                            (conf.code.comment_leading.clone()
-                                + " "
-                                + &conf.code.end_marker
-                                + "\n")
-                                .as_bytes(),
-                        )?;
+                        writeln!(
+                            content,
+                            "{} {}",
+                            conf.code.comment_leading, &conf.code.end_marker
+                        )
+                        .unwrap();
                     }
                     if let Some(inject_after) = &conf.code.inject_after {
                         for line in inject_after {
-                            file_code.write_all((line.to_string() + "\n").as_bytes())?;
+                            writeln!(content, "{}", line).unwrap();
                         }
                     }
 
@@ -142,6 +171,10 @@ impl PopulateCommand {
                     }
                 }
             }
+            create_file_footer(&mut content);
+            let content = fix_rust_code(&content)?;
+            let mut file_code = File::create(&path)?;
+            file_code.write_all(content.as_bytes())?;
 
             // if language is not found in the list of supported languges clean up files
             if !flag {
@@ -276,6 +309,7 @@ impl Command for PopulateCommand {
             if ret.is_err() && continue_on_error {
                 error_count += 1;
                 println!("{:?}", ret.unwrap_err());
+                continue;
             } else {
                 ret?;
             }
@@ -289,12 +323,13 @@ impl Command for PopulateCommand {
                 .write(true)
                 .open(&mod_path)?;
             Self::create_view(problem, &module)?;
-            mod_file.write_all(format!("// mod {};\n", mod_name).as_bytes())?;
+            mod_file.write_all(format!("mod {};\n", mod_name).as_bytes())?;
             mod_rs_files.insert(mod_path, mod_file);
         }
 
         for mod_rs in mod_rs_files.values_mut() {
-            mod_rs.write_all("\n\npub(crate) struct Solution;\n".as_bytes())?;
+            mod_rs.write_all("\n\n#[allow(dead_code)]\n".as_bytes())?;
+            mod_rs.write_all("pub(crate) struct Solution;\n".as_bytes())?;
         }
 
         println!(

@@ -34,6 +34,8 @@ regex = "1.6.0"
 scraper = "0.13.0"
 anyhow = "1.0.71"
 clap_complete = "4.3.2"
+prettyplease = "0.2.15"
+syn = "2.0.39"
 
 [dependencies.diesel]
 version = "2.0.3"

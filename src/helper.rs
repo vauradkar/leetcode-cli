@@ -191,7 +191,7 @@ mod file {
     use crate::{cache::models::Problem, Config, Error};
 
     fn get_filename(conf: Config, problem: &Problem, ext: String) -> Result<String, Error> {
-        let mut path = format!("{}/{}.{}", conf.storage.code()?, conf.code.pick, ext);
+        let mut path = format!("{}/lc_{}.{}", conf.storage.code()?, conf.code.pick, ext);
 
         path = path.replace("${fid}.${slug}", "${slug}_${fid}");
         path = path.replace("${fid}", &problem.fid.to_string());
