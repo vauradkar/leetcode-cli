@@ -1,4 +1,5 @@
 //! Populate command
+use kdam::{term, tqdm, BarExt};
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 use std::{
@@ -265,6 +266,8 @@ impl Command for PopulateCommand {
 
     /// `populate` handler
     async fn handler(m: &ArgMatches) -> Result<(), crate::Error> {
+        term::init(false);
+        term::hide_cursor()?;
         use crate::Cache;
 
         let mut cache = Cache::new()?;
@@ -294,21 +297,30 @@ impl Command for PopulateCommand {
 
         let mut premium_count = 0;
         let mut error_count = 0;
+        let mut pb = tqdm!(
+            total = problems.len(),
+            desc = "writing problems ",
+            animation = "fillup",
+            position = 0,
+            force_refresh = true
+        );
+
         for problem in &mut problems {
+            let _ = pb.update(1);
             if skip_premium && problem.locked {
                 premium_count += 1;
                 let err_msg = format!(
                     "premium question. name: {}, id:{}",
                     problem.name, problem.fid
                 );
-                println!("{} {}", "skipping".yellow(), err_msg);
+                let _ = pb.write(format!("{} {}", "skipping".yellow(), err_msg));
                 continue;
             }
 
             let ret = Self::write_file(problem, &conf, &cache).await;
             if ret.is_err() && continue_on_error {
                 error_count += 1;
-                println!("{:?}", ret.unwrap_err());
+                let _ = pb.write(format!("{:?}", ret.unwrap_err()));
                 continue;
             } else {
                 ret?;
@@ -327,13 +339,22 @@ impl Command for PopulateCommand {
             mod_rs_files.insert(mod_path, mod_file);
         }
 
+        let mut pb = tqdm!(
+            total = mod_rs_files.len(),
+            desc = "writing module ",
+            animation = "fillup",
+            position = 1,
+            force_refresh = true
+        );
         for mod_rs in mod_rs_files.values_mut() {
             mod_rs.write_all("\n\n#[allow(dead_code)]\n".as_bytes())?;
             mod_rs.write_all("pub(crate) struct Solution;\n".as_bytes())?;
+            let _ = pb.update(1);
         }
+        drop(pb);
 
         println!(
-            "problems found: {}",
+            "\n\n\nproblems found: {}",
             problems.len().to_string().bright_white()
         );
         println!("premium questions: {}", premium_count.to_string().green());
